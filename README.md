@@ -93,6 +93,7 @@ Checkpoints land in `runs/`, metrics/solutions JSON in `results/`, figures in
 ## Live demo
 
 ```bash
-# Watch a pretrained agent solve, step by step, in the terminal:
-.venv/bin/python -m brainblock.demo --ckpt runs/dense_seed0.pt
+# Watch a pretrained agent solve, step by step, in the terminal.
+# A ready pretrained model ships in models/ (no training needed):
+.venv/bin/python -m brainblock.demo --ckpt models/dense_seed0.pt
 ```
