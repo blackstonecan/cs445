@@ -123,18 +123,24 @@ seeds yield different piece orders; at **evaluation we sample** from the policy
 
 | Hyperparameter | Value |
 |---|---|
-| total timesteps | `<FILL>` per run |
-| parallel envs | `<FILL>` |
-| rollout steps | 128 |
+| total timesteps | 8,000,000 per run |
+| parallel envs | 32 |
+| rollout steps | 128 (batch 4096) |
 | discount γ | 0.99 |
 | GAE λ | 0.95 |
 | PPO clip ε | 0.2 |
 | epochs / minibatches | 4 / 4 |
-| entropy coef | `<FILL>` |
+| entropy coef | 0.03 |
 | value coef | 0.5 |
-| learning rate | 2.5e-4 (`<anneal?>`) |
+| learning rate | 2.5e-4 (constant) |
 | max grad norm | 0.5 |
 | optimizer | Adam (eps 1e-5) |
+| curriculum | floor annealed 9→0 over first 60% of training; pool of 64 distinct tilings |
+
+Each of the 10 runs (2 reward functions × 5 seeds) was trained for 8M
+environment steps (~35 min on CPU). The entropy coefficient (0.03) is deliberately
+moderate: too low (0.01) collapsed the policy onto a single solution; 0.03 keeps
+it diverse while still solving (see §5.3).
 
 ---
 
@@ -157,62 +163,128 @@ Commands to reproduce are in `README.md`.
 
 ## 5. Results
 
-*(Filled from `results/eval_*.json` and `figures/` after the experiment run.)*
+All numbers are over **5 random seeds**, evaluated on **300 episodes per seed**
+from an **empty board** (no curriculum/solver assistance), sampling from the
+policy (temperature 1.0). Reported as mean ± std across seeds.
 
-### 5.1 Learning curves
-
-![Learning curves](figures/learning_curves.png)
-
-*Figure: mean ± std over 5 seeds for total reward, total covered area, episode
-length, and invalid-action rate vs. episode #, comparing R_dense and R_sparse.*
-
-`<DISCUSS: dense learns to complete; sparse struggles / slower; coverage rises to
-1.0 for dense; invalid-rate falls as success rate rises; episode length rises
-toward 10.>`
-
-### 5.2 Aggregate metrics (5 seeds)
+### 5.1 Aggregate metrics (5 seeds each)
 
 | Metric | R_dense | R_sparse |
 |---|---|---|
-| success rate | `<FILL>` | `<FILL>` |
-| return (mean ± std) | `<FILL>` | `<FILL>` |
-| mean episode length | `<FILL>` | `<FILL>` |
-| covered fraction | `<FILL>` | `<FILL>` |
-| invalid-action rate | `<FILL>` | `<FILL>` |
+| **Success rate** (episodes fully solved) | **0.971 ± 0.013** | 0.958 ± 0.021 |
+| Episodic return (mean ± std) | 19.59 ± 0.19 | 0.96 ± 0.02 |
+| Mean episode length | 9.91 ± 0.06 | 9.84 ± 0.09 |
+| Covered fraction | 0.988 ± 0.007 | 0.979 ± 0.011 |
+| Invalid-action rate | 0.003 ± 0.001 | 0.004 ± 0.002 |
+| Distinct solutions found | 8 | 19 |
+
+(Return scales differ by construction: R_dense gives 20 for a full solve
+[10×1 + 10], R_sparse gives 1, so its return equals its success rate.)
+
+Both reward functions **solve the puzzle ~96–97% of the time** from an empty
+board, with near-zero invalid actions and episode length ≈ 10 (all pieces
+placed). Across all 10 runs the spread is tight (std ≤ 0.02 on success rate),
+demonstrating reproducible learning.
+
+### 5.2 Learning curves
+
+![Learning curves — empty-board task](figures/learning_curves.png)
+
+*Figure 1: real empty-board (pf0) metrics, mean ± std over 5 seeds. Curves are
+flat until the curriculum floor reaches 0 (dotted line) — before that point no
+empty-board episodes exist, so there is nothing to measure. Once the agent is
+asked to solve from scratch, success rises rapidly to ~0.97 (the curriculum had
+already taught the constituent skills), the invalid-action rate falls to ~0, and
+episode length reaches 10.*
+
+![Training progress — curriculum mixture](figures/learning_curves_training.png)
+
+*Figure 2: training-mixture metrics (averaged over all curriculum difficulties),
+which reveal the **gradual** learning the pf0 view hides: total reward climbs
+0→~12 (dense), episode length 1→5+, and the invalid-action rate falls from ~1.0.
+The sawtooth pattern corresponds to each curriculum step (the floor dropping by
+one), which momentarily raises difficulty before the agent re-adapts.*
+
+**Dense vs. sparse.** R_dense attains marginally higher success (0.971 vs 0.958)
+and lower variance: its per-placement reward provides a dense gradient, so credit
+assignment is easier and learning is more stable. R_sparse — rewarded only on a
+full solve — still learns well **because the curriculum supplies completions**
+(at high prefill a single correct placement triggers the terminal reward), which
+is precisely the signal a sparse reward otherwise lacks. Without the curriculum,
+the sparse reward would face a near-impossible exploration problem (§5.4).
 
 ### 5.3 Sample solutions (≥5 distinct)
 
 ![Solution gallery](figures/solutions_dense.png)
 
-*Figure: distinct full tilings discovered by the agent (different queue seeds).*
+*Figure 3: six distinct full tilings discovered by an R_dense agent (different
+queue seeds), color-coded by piece type. The agent finds many solutions rather
+than memorizing one — 8 distinct for dense, 19 for sparse over evaluation.*
+
+Notably, **R_sparse produced more than twice as many distinct solutions** (19 vs
+8). We attribute this to the dense reward subtly canalizing the policy toward a
+consistent per-placement strategy, whereas the sparse reward is indifferent to
+*how* the board is filled as long as it is completed, leaving the policy freer to
+realize many tilings. This is a useful qualitative distinction between the two
+reward designs: dense trades some solution diversity for stability and speed.
 
 ### 5.4 Qualitative rollout
 
 ![Step trace](figures/step_trace_dense.png)
 
-*Figure: one rollout placing pieces one at a time until the board is tiled.*
+*Figure 4: one greedy-sampled rollout, showing the board after each of the 10
+placements (T→Z→I→I→O→Z→T→L→O→L) until it is fully tiled. Each intermediate state
+is a legal partial packing.*
 
 ### 5.5 Failure-case discussion
 
-- **Risk-averse local optimum under an explicit invalid penalty** (§2): the agent
-  stops placing after ~5 pieces and never completes. Fixed by `invalid = 0`.
-- **Dead-ends:** greedy placement can fill the board into a configuration where
-  the current piece has no legal placement; without masking the agent then
-  necessarily commits an invalid move and terminates. `<Quantify how often.>`
-- **Sparse reward:** `<DISCUSS whether/how well R_sparse learned.>`
+- **Risk-averse local optimum under an explicit invalid penalty** (§2). With a −1
+  invalid penalty, placing the next piece is negative-expected-value whenever the
+  agent's per-step success probability is below ~0.5, so the policy converged to
+  safely placing ~5 pieces and never completing. Setting `invalid = 0` (letting
+  hard-termination be the only cost) removed this and restored deep exploration.
+- **The exploration wall without a curriculum.** Plain PPO (no curriculum) plateaus
+  at ~0.60 covered fraction with **0% completion** even after 1–2M steps: it never
+  randomly stumbles onto a full 10-piece solve, so it never experiences the
+  completion bonus. The reverse curriculum is what makes the problem learnable; we
+  consider this our central modeling finding.
+- **Diversity collapse at low entropy.** With `ent_coef = 0.01` the agent solved
+  ~100% but produced only 2–3 distinct solutions — failing the ≥5 requirement.
+  Raising entropy to 0.03 restored diversity (8–19 distinct) at negligible cost to
+  success.
+- **Residual failures (~3–4%).** The remaining unsolved episodes are dominated by
+  dead-ends: because the agent is unmasked, a slightly suboptimal early placement
+  can leave the board in a state where the current piece has no legal placement,
+  forcing an invalid move. The low invalid-action rate (~0.003) shows these are
+  rare, but they cap success below 100% — a price of the deliberate no-masking
+  design. Action masking would likely close this gap (see §6).
 
 ---
 
 ## 6. Conclusions and Future Work
 
-`<Summarize: PPO with a dense progress+completion reward and no action masking
-solves BrainBlock and finds many distinct solutions; the invalid-penalty finding;
-sparse-vs-dense comparison.>`
+We formulated BrainBlock as a finite-horizon MDP and solved it with a from-scratch
+CNN actor-critic PPO agent in a custom Gymnasium environment. Using a deliberate
+**no-action-masking, hard-terminate** design, the agent learns legality purely
+from reward. Our central finding is that this design creates a severe
+exploration problem — plain PPO never completes a board — which a **reverse
+curriculum** resolves by teaching the endgame first and progressively emptying the
+board. The final agents solve the puzzle from an empty board **~96–97% of the
+time** (5 seeds, both reward functions), with a near-zero invalid-action rate, and
+**find many distinct solutions** (8 for dense, 19 for sparse), satisfying the
+"multiple solutions, not memorization" requirement.
 
-**Future improvements.** Invalid-action masking (faster, at the cost of a
-trivial invalid-rate metric); a recurrent or attention encoder over the remaining
-queue; potential-based reward shaping; curriculum over board size; and exploring
-off-policy methods (e.g., masked DQN) for sample efficiency.
+On reward design we found: (i) an explicit invalid penalty is counterproductive
+under hard termination (it induces a risk-averse local optimum); (ii) a dense
+per-placement reward gives faster, more stable learning, while a sparse
+completion-only reward yields greater solution diversity; and (iii) the entropy
+coefficient trades success-stability against solution diversity.
+
+**Future improvements.** Invalid-action masking (would likely push success toward
+100% by eliminating dead-end failures, at the cost of a trivial invalid-rate
+metric); a recurrent or attention encoder over the remaining queue; potential-based
+reward shaping; a one-step look-ahead dead-end detector; curriculum over board
+size; and off-policy methods (e.g., masked DQN) for sample efficiency.
 
 ---
 

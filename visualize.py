@@ -60,27 +60,24 @@ def _episode_axis(histories):
     return np.cumsum(n_ep)
 
 
-def plot_learning_curves(runs_dir, modes, out_dir):
-    # Use pf0_* (real empty-board task) metrics so curriculum-prefilled episodes
-    # don't confound the curves. For non-curriculum runs these equal the mixed
-    # metrics (every episode has prefill 0).
-    panels = [
-        ("pf0_return_mean", "Total reward (empty-board task)"),
-        ("pf0_covered_mean", "Total covered area (fraction)"),
-        ("pf0_ep_len_mean", "Episode length"),
-        ("pf0_invalid_rate", "Invalid-action rate"),
-        ("pf0_success_rate", "Success rate"),
-        ("entropy", "Policy entropy"),
-    ]
-    fig, axes = plt.subplots(2, 3, figsize=(16, 8))
-    axes = axes.ravel()
-    colors = {"dense": "#1f77b4", "sparse": "#d62728"}
+def _curriculum_zero_x(histories):
+    """Episode-axis position where the curriculum floor (prefill_low) first
+    reaches 0, i.e. when empty-board episodes begin. Returns None if absent."""
+    h = histories[0]
+    x = _episode_axis(histories)
+    for t in range(min(len(h), len(x))):
+        if h[t].get("prefill_low", 0) == 0:
+            return x[t]
+    return None
 
-    histories_by_mode = {}
-    for mode in modes:
-        h = load_histories(runs_dir, mode)
-        if h:
-            histories_by_mode[mode] = h
+
+def _plot_curve_grid(histories_by_mode, panels, suptitle, path, mark_curriculum=True):
+    colors = {"dense": "#1f77b4", "sparse": "#d62728"}
+    n = len(panels)
+    cols = 3
+    rows = (n + cols - 1) // cols
+    fig, axes = plt.subplots(rows, cols, figsize=(5.3 * cols, 4 * rows))
+    axes = np.atleast_1d(axes).ravel()
 
     for ax, (key, title) in zip(axes, panels):
         for mode, hs in histories_by_mode.items():
@@ -88,21 +85,69 @@ def plot_learning_curves(runs_dir, modes, out_dir):
             x = _episode_axis(hs)
             mean = np.nanmean(arr, axis=0)
             std = np.nanstd(arr, axis=0)
-            c = colors.get(mode, None)
-            ax.plot(x, mean, label=f"{mode} (n={len(hs)} seeds)", color=c)
+            c = colors.get(mode)
+            ax.plot(x, mean, label=f"{mode} (n={len(hs)})", color=c)
             ax.fill_between(x, mean - std, mean + std, alpha=0.2, color=c)
+            if mark_curriculum:
+                zx = _curriculum_zero_x(hs)
+                if zx is not None:
+                    ax.axvline(zx, color=c, ls=":", lw=1, alpha=0.6)
         ax.set_title(title)
         ax.set_xlabel("Episode #")
-        ax.set_ylabel(title)
         ax.grid(True, alpha=0.3)
         ax.legend(fontsize=8)
-    fig.suptitle("BrainBlock PPO: learning curves (mean +/- std over seeds)",
-                 fontsize=13)
+    for j in range(len(panels), len(axes)):
+        axes[j].axis("off")
+    fig.suptitle(suptitle, fontsize=13)
     fig.tight_layout(rect=[0, 0, 1, 0.97])
-    path = os.path.join(out_dir, "learning_curves.png")
     fig.savefig(path, dpi=130)
     plt.close(fig)
     print("saved", path)
+
+
+def plot_learning_curves(runs_dir, modes, out_dir):
+    histories_by_mode = {}
+    for mode in modes:
+        h = load_histories(runs_dir, mode)
+        if h:
+            histories_by_mode[mode] = h
+    if not histories_by_mode:
+        print("no run histories found in", runs_dir)
+        return
+
+    # (1) Real empty-board task (pf0_* metrics). Flat until the curriculum floor
+    # reaches 0 (dotted line) because no empty-board episodes exist before then;
+    # the agent has already acquired the skills, so success rises quickly after.
+    pf0_panels = [
+        ("pf0_return_mean", "Total reward (empty board)"),
+        ("pf0_covered_mean", "Total covered area"),
+        ("pf0_ep_len_mean", "Episode length"),
+        ("pf0_invalid_rate", "Invalid-action rate"),
+        ("pf0_success_rate", "Success rate"),
+        ("entropy", "Policy entropy"),
+    ]
+    _plot_curve_grid(
+        histories_by_mode, pf0_panels,
+        "BrainBlock PPO learning curves -- real empty-board task "
+        "(mean +/- std over seeds; dotted = curriculum floor reaches 0)",
+        os.path.join(out_dir, "learning_curves.png"))
+
+    # (2) Training progress over the full curriculum mixture (all difficulties).
+    # Shows the gradual rise in reward/length and fall in invalid rate as the
+    # agent improves and the curriculum hardens.
+    mixed_panels = [
+        ("ep_return_mean", "Total reward (training mixture)"),
+        ("covered_mean", "Total covered area (training mixture)"),
+        ("ep_len_mean", "Episode length (training mixture)"),
+        ("invalid_rate", "Invalid-action rate (training mixture)"),
+        ("success_rate", "Success rate (training mixture)"),
+        ("entropy", "Policy entropy"),
+    ]
+    _plot_curve_grid(
+        histories_by_mode, mixed_panels,
+        "BrainBlock PPO training progress -- curriculum mixture "
+        "(mean +/- std over seeds)",
+        os.path.join(out_dir, "learning_curves_training.png"))
 
 
 # --------------------------------------------------------------- boards
