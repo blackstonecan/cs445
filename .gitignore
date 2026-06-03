@@ -1,0 +1,25 @@
+# Python virtual environment (large; recreate via README)
+.venv/
+venv/
+env/
+
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*.pyc
+.ipynb_checkpoints/
+
+# Training artifacts (regenerable; can be large)
+runs/
+runs_*/
+results/
+figures/
+*.pt
+*.ckpt
+*.pth
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
