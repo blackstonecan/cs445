@@ -221,12 +221,25 @@ the sparse reward would face a near-impossible exploration problem (§5.4).
 queue seeds), color-coded by piece type. The agent finds many solutions rather
 than memorizing one — 8 distinct for dense, 19 for sparse over evaluation.*
 
-Notably, **R_sparse produced more than twice as many distinct solutions** (19 vs
-8). We attribute this to the dense reward subtly canalizing the policy toward a
-consistent per-placement strategy, whereas the sparse reward is indifferent to
-*how* the board is filled as long as it is completed, leaving the policy freer to
-realize many tilings. This is a useful qualitative distinction between the two
-reward designs: dense trades some solution diversity for stability and speed.
+Pooled over the 5 seeds (each learns slightly different "favorite" tilings) the
+agents expose more distinct solutions (8 for dense, up to 19 for sparse at the
+20-solution collection cap). Measured fairly on a *single* agent over 1000
+rollouts, dense and sparse are similar (~10–12 distinct at default sampling); the
+larger pooled sparse count partly reflects seed-to-seed variety.
+
+**Sampling temperature controls a reliability/diversity trade-off.** A trained
+policy is concentrated, so at low temperature it reliably returns a few canonical
+tilings, while higher temperature surfaces more distinct solutions at the cost of
+success rate.
+
+![Temperature trade-off](figures/temperature_tradeoff.png)
+
+*Figure 5: success rate (blue) and number of distinct solutions (red) vs. softmax
+temperature, 800 rollouts per point. Diversity peaks around temperature 1.3–1.8
+(~15–17 distinct) before success collapses; the default temperature 1.0 gives
+~0.98 success with ~10–12 distinct solutions — a good operating point. Beyond
+~2.2 both curves fall, since distinct solutions can only be counted among solved
+episodes.* (Reproduce with `python temperature_sweep.py`.)
 
 ### 5.4 Qualitative rollout
 
