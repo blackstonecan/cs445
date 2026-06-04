@@ -40,6 +40,15 @@ python3 -m venv .venv
 .venv/bin/pip install gymnasium numpy matplotlib
 ```
 
+Or install the pinned versions from `requirements.txt` (torch still needs the CPU
+index, so install it first):
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install torch==2.12.0 --index-url https://download.pytorch.org/whl/cpu
+.venv/bin/pip install -r requirements.txt
+```
+
 ## Reproduce the experiments
 
 The `--curriculum` flag (reverse curriculum) is what lets the agent learn to
